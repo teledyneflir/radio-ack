@@ -56,14 +56,14 @@
   <div id="log"></div>
 </div>
 <script>
-// URL format: ack.html?v=TS#ALARM_ID,NTFY_TOPIC,BARK_SERVER,BTN_ID,BTN_NAME,KEY1,KEY2,...
+// URL format: ack.html?v=TS#ALARM_ID,NTFY_TOPIC,BTN_ID,BTN_NAME,USER_NAME
 var hash = window.location.hash.substring(1);
 var parts = hash.split(',');
 var alarmId   = parts[0] || '';
 var ntfyTopic = parts[1] || '';
-var barkServer = parts[2] ? decodeURIComponent(parts[2]) : '';
-var btnId     = parts[3] ? decodeURIComponent(parts[3]) : '';
-var btnName   = parts[4] ? decodeURIComponent(parts[4]) : '';
+var btnId     = parts[2] ? decodeURIComponent(parts[2]) : '';
+var btnName   = parts[3] ? decodeURIComponent(parts[3]) : '';
+var userName  = parts[4] ? decodeURIComponent(parts[4]) : '';
 var deviceKeys = parts.slice(5);
 
 function addLog(msg) {
@@ -82,7 +82,8 @@ if (!alarmId || !ntfyTopic) {
 } else {
   var label = btnName ? (btnName + ' (ID:' + btnId + ')') : ('Alarm ' + alarmId.substring(0, 8) + '...');
   document.getElementById('title').textContent = label + ' — Alarm Active';
-  document.getElementById('detail').textContent = deviceKeys.length + ' device(s) to notify';
+  var detailText = userName ? ('Responding as: ' + userName) : '';
+  document.getElementById('detail').textContent = detailText;
 }
 
 // ---- Step 1: Acknowledge (user confirms heading to location) ----
@@ -102,7 +103,9 @@ function doAck() {
     document.getElementById('commentSection').style.display = 'block';
     document.getElementById('title').textContent = (btnName || 'Alarm') + ' — Acknowledged';
     document.getElementById('title').className = 'success';
-    document.getElementById('detail').textContent = 'Alarm cancelled on all phones';
+    document.getElementById('detail').textContent = userName
+      ? ('Acknowledged by ' + userName)
+      : 'Alarm acknowledged';
   }
 
   // Safety: always show comment step after 3 seconds even if fetch hangs
@@ -196,7 +199,7 @@ function sendNtfyAck(comment) {
   var msg = 'ACK:' + alarmId + ':' +
             encodeURIComponent(btnId) + ':' +
             encodeURIComponent(btnName) + ':' +
-            encodeURIComponent(comment);
+            encodeURIComponent(userName);
   return sendToNtfy(msg);
 }
 
@@ -208,4 +211,3 @@ function sendNtfyComment(comment) {
 </script>
 </body>
 </html>
-
