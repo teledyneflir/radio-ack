@@ -96,8 +96,6 @@ function doAck() {
     if (commentShown) return;
     commentShown = true;
 
-    // Send cancel notification to all phones via Bark
-    sendBarkCancel();
 
     // Show step 2: comment section
     document.getElementById('ackSection').style.display = 'none';
@@ -207,33 +205,6 @@ function sendNtfyComment(comment) {
   return sendToNtfy(msg);
 }
 
-// ---- Bark cancel (dismiss alarm on all phones) ----
-
-function sendBarkCancel() {
-  if (!barkServer || deviceKeys.length === 0) {
-    addLog('No Bark server or keys — skipping cancel');
-    return;
-  }
-
-  var server = barkServer.replace(/\/$/, '');
-  var sent = 0;
-  var total = deviceKeys.length;
-
-  for (var i = 0; i < deviceKeys.length; i++) {
-    (function(key, idx) {
-      var cancelUrl = server + '/' + encodeURIComponent(key) +
-        '/Alarm+Handled/Acknowledged+by+user' +
-        '?sound=silence&level=passive&group=radio-buttons&isArchive=1';
-
-      var img = new Image();
-      img.onload = img.onerror = function() {
-        sent++;
-        addLog('Bark cancel [' + (idx+1) + '/' + total + '] key=' + key.substring(0,6) + '...');
-      };
-      img.src = cancelUrl;
-    })(deviceKeys[i], i);
-  }
-}
 </script>
 </body>
 </html>
