@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Acknowledge Alarm</title>
+<style>
+  body { font-family: -apple-system, sans-serif; text-align: center;
+         padding: 40px 20px; background: #1a1a1a; color: #fff; }
+  h1 { font-size: 28px; margin-bottom: 10px; }
+  .info { font-size: 16px; color: #aaa; margin: 10px 0; }
+  .success { color: #28a745; }
+  .error { color: #dc3545; }
+  .btn { display: block; width: 90%; max-width: 400px; margin: 20px auto;
+         padding: 25px; font-size: 24px; font-weight: bold;
+         background: #dc3545; color: white; border: none; border-radius: 15px;
+         cursor: pointer; box-shadow: 0 4px 15px rgba(220,53,69,0.4); }
+  .btn:active { background: #a71d2a; transform: scale(0.97); }
+  .btn.done { background: #28a745; box-shadow: 0 4px 15px rgba(40,167,69,0.4); }
+  .btn.send { background: #007bff; box-shadow: 0 4px 15px rgba(0,123,255,0.4); }
+  .btn.send:active { background: #0056b3; transform: scale(0.97); }
+  .btn.sent { background: #28a745; box-shadow: 0 4px 15px rgba(40,167,69,0.4); }
+  .btn:disabled { opacity: 0.7; cursor: default; }
+  #commentSection { display: none; margin-top: 30px; }
+  #commentBox { width: 90%; max-width: 400px; min-height: 100px; margin: 15px auto;
+                display: block; padding: 15px; font-size: 16px; border-radius: 10px;
+                border: 2px solid #444; background: #2a2a2a; color: #fff;
+                font-family: -apple-system, sans-serif; resize: vertical; }
+  #commentBox::placeholder { color: #666; }
+  #commentBox:focus { border-color: #007bff; outline: none; }
+  .comment-label { font-size: 14px; color: #aaa; margin-top: 10px; }
+  #log { text-align: left; font-size: 12px; color: #666; margin-top: 30px;
+         max-height: 200px; overflow-y: auto; font-family: monospace; }
+</style>
+</head>
+<body>
+<div id="status">
+  <h1 id="title">Alarm Active</h1>
+  <p class="info" id="detail"></p>
+
+  <!-- Step 1: Acknowledge -->
+  <div id="ackSection">
+    <p class="info">Confirm you are heading to the alarm location</p>
+    <button class="btn" id="ackBtn" onclick="doAck()">TAP TO ACKNOWLEDGE</button>
+  </div>
+
+  <!-- Step 2: Comment (shown after ack) -->
+  <div id="commentSection">
+    <p class="info success" id="ackConfirm">✓ Acknowledged — heading to location</p>
+    <p class="comment-label">Leave a comment (optional):</p>
+    <textarea id="commentBox" placeholder="e.g. Delivered parts to warehouse, checked issue..."></textarea>
+    <button class="btn send" id="sendBtn" onclick="sendComment()">SEND COMMENT</button>
+  </div>
+
+  <p class="info" id="result" style="display:none;"></p>
+  <div id="log"></div>
+</div>
+<script>
+// URL format: ack.html?v=TS#ALARM_ID,NTFY_TOPIC,BARK_SERVER,BTN_ID,BTN_NAME,KEY1,KEY2,...
+var hash = window.location.hash.substring(1);
+var parts = hash.split(',');
+var alarmId   = parts[0] || '';
+var ntfyTopic = parts[1] || '';
+var barkServer = parts[2] ? decodeURIComponent(parts[2]) : '';
+var btnId     = parts[3] ? decodeURIComponent(parts[3]) : '';
+var btnName   = parts[4] ? decodeURIComponent(parts[4]) : '';
+var deviceKeys = parts.slice(5);
+
+function addLog(msg) {
+  var el = document.getElementById('log');
+  el.innerHTML += msg + '<br>';
+  el.scrollTop = el.scrollHeight;
+}
+
+if (!alarmId || !ntfyTopic) {
+  document.getElementById('title').textContent = 'Error';
+  document.getElementById('title').className = 'error';
+  document.getElementById('detail').textContent = 'Invalid alarm link';
+  document.getElementById('ackSection').style.display = 'none';
+  addLog('hash=' + hash);
+  addLog('alarmId=' + alarmId + ' ntfyTopic=' + ntfyTopic);
+} else {
+  var label = btnName ? (btnName + ' (ID:' + btnId + ')') : ('Alarm ' + alarmId.substring(0, 8) + '...');
+  document.getElementById('title').textContent = label + ' — Alarm Active';
+  document.getElementById('detail').textContent = deviceKeys.length + ' device(s) to notify';
+}
+
+// ---- Step 1: Acknowledge (user confirms heading to location) ----
+var commentShown = false;
+function doAck() {
+  var btn = document.getElementById('ackBtn');
+  btn.textContent = 'SENDING...';
+  btn.disabled = true;
+
+  function showCommentStep() {
+    if (commentShown) return;
+    commentShown = true;
+
+    // Send cancel notification to all phones via Bark
+    sendBarkCancel();
+
+    // Show step 2: comment section
+    document.getElementById('ackSection').style.display = 'none';
+    document.getElementById('commentSection').style.display = 'block';
+    document.getElementById('title').textContent = (btnName || 'Alarm') + ' — Acknowledged';
+    document.getElementById('title').className = 'success';
+    document.getElementById('detail').textContent = 'Alarm cancelled on all phones';
+  }
+
+  // Safety: always show comment step after 3 seconds even if fetch hangs
+  setTimeout(showCommentStep, 3000);
+
+  // Send ACK (without comment) to ntfy so Python knows immediately
+  try {
+    sendNtfyAck('').then(showCommentStep).catch(showCommentStep);
+  } catch(e) {
+    addLog('ACK exception: ' + e.message);
+    showCommentStep();
+  }
+}
+
+// ---- Step 2: Send comment ----
+function sendComment() {
+  var comment = document.getElementById('commentBox').value.trim();
+  var sendBtn = document.getElementById('sendBtn');
+  sendBtn.textContent = 'SENDING...';
+  sendBtn.disabled = true;
+
+  function onDone() {
+    sendBtn.textContent = comment ? 'COMMENT SENT ✓' : 'DONE ✓';
+    sendBtn.className = 'btn sent';
+    document.getElementById('commentBox').disabled = true;
+    document.getElementById('result').style.display = 'block';
+    document.getElementById('result').textContent = comment
+      ? 'Comment delivered to system.'
+      : 'No comment — done.';
+    document.getElementById('result').className = 'info success';
+  }
+
+  // Send comment via ntfy
+  sendNtfyComment(comment).then(onDone).catch(onDone);
+}
+
+// ---- ntfy.sh messaging ----
+// fetch to ntfy.sh is blocked by CORS preflight from github.io.
+// Solution 1: navigator.sendBeacon() — fire-and-forget POST, no CORS preflight.
+// Solution 2: hidden <form> POST with enctype="text/plain" into hidden <iframe>.
+// Both completely bypass CORS restrictions.
+
+// Create hidden iframe for form fallback
+var ntfyFrame = document.createElement('iframe');
+ntfyFrame.name = 'ntfyFrame';
+ntfyFrame.style.display = 'none';
+document.body.appendChild(ntfyFrame);
+
+function sendToNtfy(msg) {
+  var topic = encodeURIComponent(ntfyTopic);
+  var url = 'https://ntfy.sh/' + topic;
+  addLog('ntfy → ' + msg.substring(0, 60));
+
+  // Try sendBeacon first (simple POST, no CORS preflight, no response needed)
+  if (navigator.sendBeacon) {
+    var blob = new Blob([msg], { type: 'text/plain' });
+    var ok = navigator.sendBeacon(url, blob);
+    addLog('ntfy: sendBeacon ' + (ok ? 'queued' : 'failed'));
+    if (ok) return Promise.resolve();
+  }
+
+  // Fallback: hidden form POST into iframe (forms are never blocked by CORS)
+  return new Promise(function(resolve) {
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = url;
+    form.target = 'ntfyFrame';
+    form.enctype = 'text/plain';
+    form.style.display = 'none';
+
+    // With enctype="text/plain", body = "name=value\r\n"
+    // Put message as the input name, empty value → body = "MSG=\r\n"
+    // ntfy will see the whole line as the message
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = msg;
+    input.value = '';
+    form.appendChild(input);
+
+    document.body.appendChild(form);
+    form.submit();
+    setTimeout(function() {
+      document.body.removeChild(form);
+      addLog('ntfy: form fallback submitted');
+      resolve();
+    }, 500);
+  });
+}
+
+function sendNtfyAck(comment) {
+  var msg = 'ACK:' + alarmId + ':' +
+            encodeURIComponent(btnId) + ':' +
+            encodeURIComponent(btnName) + ':' +
+            encodeURIComponent(comment);
+  return sendToNtfy(msg);
+}
+
+function sendNtfyComment(comment) {
+  var msg = 'COMMENT:' + alarmId + ':' + encodeURIComponent(comment);
+  return sendToNtfy(msg);
+}
+
+// ---- Bark cancel (dismiss alarm on all phones) ----
+
+function sendBarkCancel() {
+  if (!barkServer || deviceKeys.length === 0) {
+    addLog('No Bark server or keys — skipping cancel');
+    return;
+  }
+
+  var server = barkServer.replace(/\/$/, '');
+  var sent = 0;
+  var total = deviceKeys.length;
+
+  for (var i = 0; i < deviceKeys.length; i++) {
+    (function(key, idx) {
+      var cancelUrl = server + '/' + encodeURIComponent(key) +
+        '/Alarm+Handled/Acknowledged+by+user' +
+        '?sound=silence&level=passive&group=radio-buttons&isArchive=1';
+
+      var img = new Image();
+      img.onload = img.onerror = function() {
+        sent++;
+        addLog('Bark cancel [' + (idx+1) + '/' + total + '] key=' + key.substring(0,6) + '...');
+      };
+      img.src = cancelUrl;
+    })(deviceKeys[i], i);
+  }
+}
+</script>
+</body>
+</html>
+
